@@ -1,0 +1,15 @@
+[package]
+name = "audio_recorder"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cpal = "0.15"
+hound = "3.5"
+ctrlc = "3.2"
+anyhow = "1.0"
+log = "0.4"
+env_logger = "0.10"
+
+[profile.release]
+opt-level = 3

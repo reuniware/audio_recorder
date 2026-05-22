@@ -1,0 +1,1 @@
+C:\Users\TSTAC\.gemini\antigravity\scratch\audio_recorder\target\release\audio_recorder.exe: C:\Users\TSTAC\.gemini\antigravity\scratch\audio_recorder\src\main.rs C:\Users\TSTAC\.gemini\antigravity\scratch\audio_recorder\src\recorder.rs
