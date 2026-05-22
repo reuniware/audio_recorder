@@ -10,7 +10,7 @@ use cpal::traits::DeviceTrait;
 mod recorder;
 
 fn print_usage() {
-    eprintln!("Usage: audio_recorder [output_path] [--list-devices] [--device-index <index>]");
+    eprintln!("Usage: audio_recorder [output_path] [--list-devices] [--auto-signal] [--device-index <index>]");
     eprintln!("If no output_path is provided, 'recording.wav' is created in the current directory.");
 }
 
@@ -22,6 +22,7 @@ fn main() -> Result<()> {
 
     // Parse arguments
     let mut device_index: Option<usize> = None;
+    let mut auto_signal = false;
     let mut output_path = PathBuf::from("recording.wav");
     let mut i = 1;
     while i < args.len() {
@@ -30,6 +31,9 @@ fn main() -> Result<()> {
                 recorder::list_input_devices()?;
                 return Ok(());
             }
+            "--auto-signal" => {
+                auto_signal = true;
+            }
             "--device-index" => {
                 if i + 1 < args.len() {
                     device_index = Some(args[i + 1].parse::<usize>().map_err(|_| anyhow!("Invalid device index"))?);
@@ -37,7 +41,7 @@ fn main() -> Result<()> {
                 } else {
                     return Err(anyhow!("--device-index requires a numeric argument"));
                 }
-            }
+            },
             "--help" | "-h" => {
                 print_usage();
                 return Ok(());
@@ -55,6 +59,8 @@ fn main() -> Result<()> {
     // Choose device
     let device = if let Some(idx) = device_index {
         recorder::get_input_device_by_index(idx)?
+    } else if auto_signal {
+        recorder::select_device_with_signal(0.01)? // RMS threshold
     } else {
         recorder::select_active_input_device()? // fallback to default or first available
     };

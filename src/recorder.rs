@@ -20,9 +20,9 @@ pub fn list_input_devices() -> Result<()> {
 /// Get an input device by its 1‑based index as shown by `list_input_devices`.
 pub fn get_input_device_by_index(index: usize) -> Result<cpal::Device> {
     let host = cpal::default_host();
-    let mut devices = host.input_devices()?;
+    
     let mut i = 0usize;
-    for device in devices {
+    for device in host.input_devices()? {
         i += 1;
         if i == index {
             return Ok(device);
@@ -51,6 +51,115 @@ pub fn select_active_input_device() -> Result<cpal::Device> {
         }
         Err(e) => Err(anyhow!("Failed to enumerate input devices: {}", e)),
     }
+}
+
+/// Scan input devices and pick the one that shows the highest RMS signal level.
+/// `threshold` is a minimum RMS value (0‑1 range) required to consider a device active.
+pub fn select_device_with_signal(threshold: f32) -> Result<cpal::Device> {
+    let host = cpal::default_host();
+    let mut best_device: Option<cpal::Device> = None;
+    let mut best_rms: f32 = 0.0;
+    // Iterate over all input devices
+    for device in host.input_devices()? {
+        // Try to get a usable config (same filters as in record_to_wav)
+        let desired_formats = [SampleFormat::F32, SampleFormat::I16, SampleFormat::U16];
+        let config_opt = device
+            .supported_input_configs()?
+            .filter(|c| desired_formats.contains(&c.sample_format()))
+            .max_by_key(|c| c.max_sample_rate())
+            .map(|c| c.with_max_sample_rate());
+        if config_opt.is_none() {
+            continue; // skip devices without a usable format
+        }
+        let config = config_opt.unwrap();
+        let sample_format = config.sample_format();
+        // Measure RMS for a short period (~500 ms)
+        let rms = match measure_rms(&device, &config.into(), sample_format) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if rms > best_rms {
+            best_rms = rms;
+            best_device = Some(device);
+        }
+    }
+    if let Some(dev) = best_device {
+        if best_rms >= threshold {
+            return Ok(dev);
+        }
+    }
+    // Fallback to default or first device if no signal above threshold
+    select_active_input_device()
+}
+
+use std::sync::mpsc::{sync_channel, SyncSender, Receiver};
+use std::time::Duration;
+
+/// Helper that records a short burst of samples and returns the RMS amplitude.
+fn measure_rms(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    sample_format: SampleFormat,
+) -> Result<f32> {
+    // Channel to stop after enough samples are collected
+    let (tx, rx): (SyncSender<()>, Receiver<()>) = sync_channel(0);
+    let mut sum: f64 = 0.0;
+    let mut count: usize = 0;
+    let err_fn = |e| eprintln!("stream error: {}", e);
+    // Build stream according to format
+    let stream = match sample_format {
+        SampleFormat::F32 => device.build_input_stream(
+            config,
+            move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                for &s in data {
+                    sum += (s as f64) * (s as f64);
+                    count += 1;
+                    if count >= 48000 / 2 { // approx 0.5 s at 48 kHz
+                        let _ = tx.send(());
+                        break;
+                    }
+                }
+            },
+            err_fn,
+            None,
+        )?,
+        SampleFormat::I16 => device.build_input_stream(
+            config,
+            move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                for &s in data {
+                    let f = s as f32 / i16::MAX as f32;
+                    sum += (f as f64) * (f as f64);
+                    count += 1;
+                    if count >= 48000 / 2 { let _ = tx.send(()); break; }
+                }
+            },
+            err_fn,
+            None,
+        )?,
+        SampleFormat::U16 => device.build_input_stream(
+            config,
+            move |data: &[u16], _: &cpal::InputCallbackInfo| {
+                for &s in data {
+                    let f = s as f32 / u16::MAX as f32;
+                    sum += (f as f64) * (f as f64);
+                    count += 1;
+                    if count >= 48000 / 2 { let _ = tx.send(()); break; }
+                }
+            },
+            err_fn,
+            None,
+        )?,
+        _ => return Err(anyhow!("Unsupported sample format for stream")),
+    };
+    stream.play()?;
+    // Wait for the signal or timeout (2 s max)
+    let _ = rx.recv_timeout(Duration::from_secs(2));
+    drop(stream);
+    if count == 0 {
+        return Ok(0.0);
+    }
+    let rms = (sum / count as f64).sqrt() as f32;
+    Ok(rms)
 }
 
 

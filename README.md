@@ -38,6 +38,7 @@ The compiled executable will be placed at:
 |--------|-------------|
 | `--list-devices` | Lists all input devices (microphones) available on the system. |
 | `--device-index <N>` | Selects the *N*‑th device from the list (1‑based). If omitted, the program uses the system default device. |
+| `--auto-signal` | Enables automatic device selection based on the highest audio signal level (RMS detection). |
 | `<output‑file>` | Optional path for the resulting WAV file. Defaults to `recording.wav` in the current directory. |
 
 ### Example usage
